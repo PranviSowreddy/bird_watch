@@ -492,7 +492,7 @@ if uploaded is not None:
                     key=f"mark_{selected_month_name}",
                 )
 
-            # ── Year distribution chart ──────────────────────────────────────
+            # ── Year distribution chart ───────────────────────────────────────────────
             years = [o["year"] for o in filtered_occurrences if o["year"]]
             if years:
                 import collections
@@ -514,79 +514,120 @@ if uploaded is not None:
             # ── Near Me ─────────────────────────────────────────────────────
             st.divider()
             st.markdown("### 📍 Sightings Near Me")
-            st.caption(
-                "Enter a city or place name to find recorded sightings nearby."
+
+            from api_utils import get_nearby_sightings, build_nearby_map
+
+            # Radius picker (shared by both input methods)
+            radius_km = st.slider(
+                "Search radius (km)", min_value=25, max_value=500,
+                value=100, step=25, key="near_me_radius",
             )
 
-            col_loc, col_rad = st.columns([3, 1])
-            with col_loc:
+            # ── Method 1: Browser geolocation ────────────────────────────────
+            st.markdown(
+                "<div style='display:flex;align-items:center;gap:0.5rem;'>"
+                "<span style='font-size:1.5rem;'>🌐</span>"
+                "<b>Use your device location</b>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Click the button below — your browser will ask for permission "
+                "to share your location. No data is stored or sent externally."
+            )
+
+            from streamlit_js_eval import get_geolocation
+
+            geo = get_geolocation()
+
+
+            user_lat = user_lon = None
+            location_label = None
+
+            if geo and isinstance(geo, dict) and "coords" in geo:
+                coords_raw = geo["coords"]
+                user_lat = coords_raw.get("latitude")
+                user_lon = coords_raw.get("longitude")
+                accuracy = coords_raw.get("accuracy")
+                if user_lat is not None and user_lon is not None:
+                    acc_str = f", accuracy ±{accuracy:.0f} m" if accuracy else ""
+                    location_label = f"your device ({user_lat:.4f}°, {user_lon:.4f}°{acc_str})"
+                    st.success(f"📍 Location acquired: **{location_label}**")
+
+            # ── Method 2: Manual city fallback ───────────────────────────────
+            if user_lat is None:
+                st.markdown(
+                    "<div style='margin-top:0.8rem;display:flex;align-items:center;"
+                    "gap:0.5rem;'><span style='font-size:1.4rem;'>🔍</span>"
+                    "<b>Or search by city name</b></div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption("Used as a fallback if location permission is denied.")
+
                 location_query = st.text_input(
-                    "🔍 Search location",
+                    "City / place name",
                     placeholder="e.g. Mumbai, Delhi, Bengaluru…",
                     key="near_me_query",
-                )
-            with col_rad:
-                radius_km = st.slider(
-                    "Radius (km)", min_value=25, max_value=500,
-                    value=100, step=25, key="near_me_radius",
+                    label_visibility="collapsed",
                 )
 
-            if location_query:
-                from api_utils import geocode_location, get_nearby_sightings, build_nearby_map
+                if location_query:
+                    from api_utils import geocode_location
+                    with st.spinner(f"Locating **{location_query}**…"):
+                        coords = geocode_location(location_query)
 
-                with st.spinner(f"Locating **{location_query}**…"):
-                    coords = geocode_location(location_query)
-
-                if coords is None:
-                    st.error(
-                        f"Could not find **{location_query}**. "
-                        "Try a different city name or check spelling."
-                    )
-                else:
-                    user_lat, user_lon = coords
-                    st.success(
-                        f"📍 Found: **{location_query}** "
-                        f"({user_lat:.3f}°, {user_lon:.3f}°)"
-                    )
-
-                    with st.spinner("Filtering nearby sightings…"):
-                        nearby = get_nearby_sightings(
-                            occurrences, user_lat, user_lon, radius_km
+                    if coords is None:
+                        st.error(
+                            f"Could not find **{location_query}**. "
+                            "Try a different city name or check spelling."
                         )
-
-                    if nearby:
-                        st.info(
-                            f"🐦 **{len(nearby)}** sighting(s) of *{top_name}* "
-                            f"within **{radius_km} km** of {location_query}"
-                        )
-                        m_near = build_nearby_map(
-                            nearby, user_lat, user_lon, top_name
-                        )
-                        st_folium(
-                            m_near,
-                            width=None,
-                            height=420,
-                            returned_objects=[],
-                            key=f"near_{location_query}_{radius_km}",
-                        )
-
-                        # Distance table (top 15)
-                        st.markdown("**Nearest sightings:**")
-                        table_rows = [
-                            {
-                                "Distance": f"{o['distance_km']} km",
-                                "Locality": o.get("locality", "Unknown"),
-                                "Year": o.get("year", "—"),
-                            }
-                            for o in nearby[:15]
-                        ]
-                        st.table(table_rows)
                     else:
-                        st.warning(
-                            f"No sightings of *{top_name}* found within "
-                            f"**{radius_km} km** of **{location_query}**. "
-                            "Try increasing the radius."
+                        user_lat, user_lon = coords
+                        location_label = (
+                            f"{location_query} ({user_lat:.3f}°, {user_lon:.3f}°)"
                         )
+                        st.success(f"📍 Found: **{location_label}**")
+
+            # ── Render nearby map if we have coordinates ─────────────────────
+            if user_lat is not None and user_lon is not None:
+                with st.spinner("Filtering nearby sightings…"):
+                    nearby = get_nearby_sightings(
+                        occurrences, user_lat, user_lon, radius_km
+                    )
+
+                if nearby:
+                    st.info(
+                        f"🐦 **{len(nearby)}** sighting(s) of *{top_name}* "
+                        f"within **{radius_km} km** of {location_label or 'your location'}"
+                    )
+                    m_near = build_nearby_map(
+                        nearby, user_lat, user_lon, top_name
+                    )
+                    st_folium(
+                        m_near,
+                        width=None,
+                        height=420,
+                        returned_objects=[],
+                        key=f"near_{round(user_lat, 2)}_{round(user_lon, 2)}_{radius_km}",
+                    )
+
+                    # Distance table (top 15)
+                    st.markdown("**Nearest sightings:**")
+                    table_rows = [
+                        {
+                            "Distance": f"{o['distance_km']} km",
+                            "Locality": o.get("locality", "Unknown"),
+                            "Year": o.get("year", "—"),
+                        }
+                        for o in nearby[:15]
+                    ]
+                    st.table(table_rows)
+                else:
+                    st.warning(
+                        f"No sightings of *{top_name}* found within "
+                        f"**{radius_km} km** of your location. "
+                        "Try increasing the radius."
+                    )
 
         else:
             st.warning(
