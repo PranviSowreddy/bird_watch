@@ -12,7 +12,7 @@ echo "=========================================="
 # ── 1. Install Python dependencies ────────────────────────────────────────────
 echo ""
 echo "1/4  Installing Python packages…"
-pip install -q -r requirements.txt
+pip3 install -q -r requirements.txt
 
 # ── 2. Create cache directory ──────────────────────────────────────────────────
 echo "2/4  Preparing cache directory…"
@@ -37,7 +37,7 @@ fi
 # ── 4. Train model (if dataset present) ──────────────────────────────────────
 if [ -d "./dataset" ] && [ ! -f "bird_classifier.pth" ]; then
   echo "4/4  Training EfficientNet-B0 (this may take 20-60 min on CPU, ~5 min on GPU)…"
-  python train_model.py --data_dir ./dataset --epochs 20 --batch_size 32
+  python3 train_model.py --data_dir ./dataset --epochs 20 --batch_size 32
 else
   if [ -f "bird_classifier.pth" ]; then
     echo "4/4  bird_classifier.pth found — skipping training."
@@ -49,5 +49,5 @@ fi
 echo ""
 echo "=========================================="
 echo "  Setup complete! Run the app with:"
-echo "    streamlit run app.py"
+echo "    python3 -m streamlit run app.py"
 echo "=========================================="
