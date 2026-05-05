@@ -403,40 +403,102 @@ if uploaded is not None:
             )
 
         if occurrences:
-            # 📅 Seasonal Migration Timeline Slider
-            months = ["All Year", "January", "February", "March", "April", "May", "June", 
-                      "July", "August", "September", "October", "November", "December"]
-            
+            # ── Month filter (feeds all map types) ──────────────────────────
+            months = ["All Year", "January", "February", "March", "April",
+                      "May", "June", "July", "August", "September",
+                      "October", "November", "December"]
+
             selected_month_name = st.select_slider(
                 "📅 **Seasonal Migration Timeline**",
                 options=months,
                 value="All Year",
-                help="Select a month to see where this species is typically spotted during that time of year."
+                help="Filter sightings by month across all map types.",
             )
 
             filtered_occurrences = occurrences
             if selected_month_name != "All Year":
                 month_idx = months.index(selected_month_name)
-                filtered_occurrences = [o for o in occurrences if o.get("month") == month_idx]
-            
-            if not filtered_occurrences and selected_month_name != "All Year":
-                st.warning(f"No recorded sightings found for **{selected_month_name}** in this dataset.")
-            elif selected_month_name != "All Year":
-                st.success(f"Showing **{len(filtered_occurrences)}** sightings for **{selected_month_name}**")
-            else:
-                st.success(f"Found **{len(occurrences)}** total recorded global sightings")
+                filtered_occurrences = [
+                    o for o in occurrences if o.get("month") == month_idx
+                ]
 
-            from api_utils import build_folium_map
+            count_label = (
+                f"**{len(filtered_occurrences)}** sightings for **{selected_month_name}**"
+                if selected_month_name != "All Year"
+                else f"**{len(occurrences)}** total recorded global sightings"
+            )
+            if filtered_occurrences:
+                st.success(f"Showing {count_label}")
+            else:
+                st.warning(
+                    f"No recorded sightings found for **{selected_month_name}** in this dataset."
+                )
+
+            from api_utils import build_heatmap, build_animated_map, build_marker_map
             from streamlit_folium import st_folium
 
-            m = build_folium_map(filtered_occurrences, top_name)
-            st_folium(m, width=None, height=480, returned_objects=[], key=f"map_{selected_month_name}")
+            # ── Map type sub-tabs ────────────────────────────────────────────
+            heat_tab, anim_tab, marker_tab = st.tabs(
+                ["🔥 Heatmap", "🎞️ Animation", "📍 Markers"]
+            )
 
-            # Year distribution (using filtered data)
+            with heat_tab:
+                st.caption(
+                    "Density heatmap — blue (sparse) → red (dense). "
+                    "Zoom in to explore regional clusters."
+                )
+                m_heat = build_heatmap(filtered_occurrences, top_name)
+                st_folium(
+                    m_heat,
+                    width=None,
+                    height=480,
+                    returned_objects=[],
+                    key=f"heat_{selected_month_name}",
+                )
+
+            with anim_tab:
+                st.caption(
+                    "Timeline animation — points appear chronologically. "
+                    "Use the ▶ play button on the map to start playback."
+                )
+                if len(occurrences) > 0:
+                    m_anim = build_animated_map(occurrences, top_name)
+                    st_folium(
+                        m_anim,
+                        width=None,
+                        height=500,
+                        returned_objects=[],
+                        key="anim_map",
+                    )
+                    st.info(
+                        "ℹ️ Animation uses **all-year data** regardless of the "
+                        "month filter above — the playback itself shows the "
+                        "progression through time."
+                    )
+                else:
+                    st.warning("Not enough data for animation.")
+
+            with marker_tab:
+                st.caption(
+                    "Clustered markers — click a cluster to expand, "
+                    "click a marker to see locality details."
+                )
+                m_mark = build_marker_map(filtered_occurrences, top_name)
+                st_folium(
+                    m_mark,
+                    width=None,
+                    height=480,
+                    returned_objects=[],
+                    key=f"mark_{selected_month_name}",
+                )
+
+            # ── Year distribution chart ──────────────────────────────────────
             years = [o["year"] for o in filtered_occurrences if o["year"]]
             if years:
                 import collections
-                year_counts = collections.Counter(int(y) for y in years if str(y).isdigit())
+                year_counts = collections.Counter(
+                    int(y) for y in years if str(y).isdigit()
+                )
                 if year_counts:
                     st.markdown("**Sightings by year:**")
                     sorted_years = sorted(year_counts.keys())
@@ -448,16 +510,95 @@ if uploaded is not None:
                         color="#40916c",
                         height=220,
                     )
+
+            # ── Near Me ─────────────────────────────────────────────────────
+            st.divider()
+            st.markdown("### 📍 Sightings Near Me")
+            st.caption(
+                "Enter a city or place name to find recorded sightings nearby."
+            )
+
+            col_loc, col_rad = st.columns([3, 1])
+            with col_loc:
+                location_query = st.text_input(
+                    "🔍 Search location",
+                    placeholder="e.g. Mumbai, Delhi, Bengaluru…",
+                    key="near_me_query",
+                )
+            with col_rad:
+                radius_km = st.slider(
+                    "Radius (km)", min_value=25, max_value=500,
+                    value=100, step=25, key="near_me_radius",
+                )
+
+            if location_query:
+                from api_utils import geocode_location, get_nearby_sightings, build_nearby_map
+
+                with st.spinner(f"Locating **{location_query}**…"):
+                    coords = geocode_location(location_query)
+
+                if coords is None:
+                    st.error(
+                        f"Could not find **{location_query}**. "
+                        "Try a different city name or check spelling."
+                    )
+                else:
+                    user_lat, user_lon = coords
+                    st.success(
+                        f"📍 Found: **{location_query}** "
+                        f"({user_lat:.3f}°, {user_lon:.3f}°)"
+                    )
+
+                    with st.spinner("Filtering nearby sightings…"):
+                        nearby = get_nearby_sightings(
+                            occurrences, user_lat, user_lon, radius_km
+                        )
+
+                    if nearby:
+                        st.info(
+                            f"🐦 **{len(nearby)}** sighting(s) of *{top_name}* "
+                            f"within **{radius_km} km** of {location_query}"
+                        )
+                        m_near = build_nearby_map(
+                            nearby, user_lat, user_lon, top_name
+                        )
+                        st_folium(
+                            m_near,
+                            width=None,
+                            height=420,
+                            returned_objects=[],
+                            key=f"near_{location_query}_{radius_km}",
+                        )
+
+                        # Distance table (top 15)
+                        st.markdown("**Nearest sightings:**")
+                        table_rows = [
+                            {
+                                "Distance": f"{o['distance_km']} km",
+                                "Locality": o.get("locality", "Unknown"),
+                                "Year": o.get("year", "—"),
+                            }
+                            for o in nearby[:15]
+                        ]
+                        st.table(table_rows)
+                    else:
+                        st.warning(
+                            f"No sightings of *{top_name}* found within "
+                            f"**{radius_km} km** of **{location_query}**. "
+                            "Try increasing the radius."
+                        )
+
         else:
             st.warning(
                 "No iNaturalist occurrence data found for this species. "
                 "This may be due to API rate limits or sparse records."
             )
-            # Show a placeholder map centred on India
-            from api_utils import build_folium_map
+            from api_utils import build_heatmap
             from streamlit_folium import st_folium
-            m = build_folium_map([], top_name)
+            m = build_heatmap([], top_name)
             st_folium(m, width=None, height=400, returned_objects=[])
+
+
 
     # ── Tab 3: Wikipedia ──────────────────────────────────────────────────────
     with tab3:

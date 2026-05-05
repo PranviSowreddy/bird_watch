@@ -116,20 +116,113 @@ def get_inaturalist_occurrences(
         return []
 
 
-def build_folium_map(occurrences: list[dict], species_name: str):
-    """Build a folium map with occurrence markers. Returns folium.Map."""
+def build_heatmap(occurrences: list[dict], species_name: str):
+    """
+    Build a Folium map with a HeatMap density layer.
+    Blue (sparse) → red (dense) gradient.
+    Returns folium.Map.
+    """
+    import folium
+    from folium.plugins import HeatMap
+
+    m = folium.Map(location=[20.0, 0.0], zoom_start=2, tiles="CartoDB positron")
+
+    heat_data = [[o["lat"], o["lon"]] for o in occurrences]
+    if heat_data:
+        HeatMap(
+            heat_data,
+            name="Sighting Density",
+            radius=13,
+            blur=18,
+            min_opacity=0.3,
+            gradient={
+                "0.2": "blue",
+                "0.45": "cyan",
+                "0.65": "lime",
+                "0.85": "orange",
+                "1.0": "red",
+            },
+        ).add_to(m)
+
+    folium.LayerControl().add_to(m)
+    return m
+
+
+def build_animated_map(occurrences: list[dict], species_name: str):
+    """
+    Build a Folium map with TimestampedGeoJson animation.
+    Points appear over time with a playback slider and auto-play.
+    Returns folium.Map.
+    """
+    import json as _json
+    import folium
+    from folium.plugins import TimestampedGeoJson
+
+    m = folium.Map(location=[20.0, 0.0], zoom_start=2, tiles="CartoDB positron")
+
+    features = []
+    for o in occurrences:
+        year = o.get("year") or "2000"
+        month = o.get("month") or 1
+        try:
+            timestamp = f"{int(year):04d}-{int(month):02d}-01"
+        except (ValueError, TypeError):
+            timestamp = "2000-01-01"
+
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [o["lon"], o["lat"]],
+            },
+            "properties": {
+                "time": timestamp,
+                "popup": (
+                    f"<b>{species_name}</b><br>"
+                    f"📍 {o.get('locality', 'Unknown')}<br>"
+                    f"📅 {year}"
+                ),
+                "icon": "circle",
+                "iconstyle": {
+                    "fillColor": "#e25822",
+                    "fillOpacity": 0.7,
+                    "stroke": True,
+                    "color": "#fff",
+                    "weight": 1,
+                    "radius": 5,
+                },
+            },
+        })
+
+    if features:
+        TimestampedGeoJson(
+            data={"type": "FeatureCollection", "features": features},
+            period="P1M",           # step = 1 month
+            duration="P1M",
+            auto_play=False,
+            loop=False,
+            max_speed=5,
+            loop_button=True,
+            date_options="YYYY-MM",
+            time_slider_drag_update=True,
+        ).add_to(m)
+
+    return m
+
+
+def build_marker_map(occurrences: list[dict], species_name: str):
+    """Build a Folium map with clustered circle markers (original view)."""
     import folium
     from folium.plugins import MarkerCluster
 
-    # Centre on a global view for migrant bird visualization
     m = folium.Map(location=[20.0, 0.0], zoom_start=2, tiles="CartoDB positron")
-
     cluster = MarkerCluster(name="Sightings").add_to(m)
+
     for occ in occurrences:
         popup_text = (
             f"<b>{species_name}</b><br>"
-            f"Locality: {occ['locality']}<br>"
-            f"Year: {occ['year']}"
+            f"📍 {occ['locality']}<br>"
+            f"📅 {occ['year']}"
         )
         folium.CircleMarker(
             location=[occ["lat"], occ["lon"]],
@@ -143,6 +236,95 @@ def build_folium_map(occurrences: list[dict], species_name: str):
 
     folium.LayerControl().add_to(m)
     return m
+
+
+def geocode_location(query: str) -> tuple[float, float] | None:
+    """
+    Convert a city/place name to (lat, lon) using Nominatim (OpenStreetMap).
+    Returns None if the location cannot be resolved.
+    """
+    try:
+        from geopy.geocoders import Nominatim
+        geolocator = Nominatim(user_agent="BirdIDApp/1.0")
+        location = geolocator.geocode(query, timeout=8)
+        if location:
+            return (location.latitude, location.longitude)
+    except Exception:
+        pass
+    return None
+
+
+def get_nearby_sightings(
+    occurrences: list[dict],
+    user_lat: float,
+    user_lon: float,
+    radius_km: float = 50.0,
+) -> list[dict]:
+    """
+    Filter occurrences within radius_km of (user_lat, user_lon).
+    Returns observations sorted by distance (nearest first),
+    with a 'distance_km' key added to each dict.
+    """
+    try:
+        from geopy.distance import geodesic
+    except ImportError:
+        return []
+
+    nearby = []
+    user_point = (user_lat, user_lon)
+    for o in occurrences:
+        obs_point = (o["lat"], o["lon"])
+        try:
+            dist = geodesic(user_point, obs_point).km
+        except Exception:
+            continue
+        if dist <= radius_km:
+            nearby.append({**o, "distance_km": round(dist, 1)})
+
+    nearby.sort(key=lambda x: x["distance_km"])
+    return nearby
+
+
+def build_nearby_map(
+    nearby: list[dict],
+    user_lat: float,
+    user_lon: float,
+    species_name: str,
+) -> object:
+    """
+    Build a Folium map centred on user location with nearby sightings.
+    User location shown as a blue marker; sightings as orange markers.
+    """
+    import folium
+
+    m = folium.Map(location=[user_lat, user_lon], zoom_start=7, tiles="CartoDB positron")
+
+    # User location marker
+    folium.Marker(
+        location=[user_lat, user_lon],
+        popup="📍 Your location",
+        icon=folium.Icon(color="blue", icon="home", prefix="fa"),
+    ).add_to(m)
+
+    for o in nearby:
+        popup_text = (
+            f"<b>{species_name}</b><br>"
+            f"📍 {o.get('locality', 'Unknown')}<br>"
+            f"📏 {o['distance_km']} km away<br>"
+            f"📅 {o.get('year', '—')}"
+        )
+        folium.CircleMarker(
+            location=[o["lat"], o["lon"]],
+            radius=6,
+            color="#e25822",
+            fill=True,
+            fill_color="#e25822",
+            fill_opacity=0.75,
+            popup=folium.Popup(popup_text, max_width=220),
+        ).add_to(m)
+
+    return m
+
 
 
 # ── Kid's Corner (Gemini funny story) ────────────────────────────────────────
