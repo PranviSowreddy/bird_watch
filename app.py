@@ -477,14 +477,14 @@ if uploaded is not None:
         st.markdown(f"### 🐣 Kid's Corner — *{top_name}*")
         st.info("🎉 A fun zone for young birders! Listen to the real bird call and read a funny story!")
 
-        from api_utils import get_kids_funny_story, get_xenocanto_audio
+        from api_utils import get_kids_funny_story, get_inaturalist_audio
 
         # ── Bird Call Audio Player ────────────────────────────────────────────
-        st.markdown('<div class="section-title">🔊 Real Bird Call (from Xeno-Canto)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">🔊 Real Bird Call (from iNaturalist)</div>', unsafe_allow_html=True)
 
         @st.cache_data(show_spinner=False)
         def cached_audio(sci: str):
-            return get_xenocanto_audio(sci)
+            return get_inaturalist_audio(sci)
 
         with st.spinner("Fetching bird call recording..."):
             audio_info = cached_audio(sp.get("scientific_name", top_name))
@@ -494,19 +494,18 @@ if uploaded is not None:
                 f"""
                 <div style="background:#f0fdf4;border-radius:12px;padding:1rem 1.2rem;
                             border:1px solid #bbf7d0;margin-bottom:0.5rem;">
-                  🎵 <b>Recording type:</b> {audio_info['type'].title()} &nbsp;|&nbsp;
-                  📍 <b>Location:</b> {audio_info['location']} &nbsp;|&nbsp;
-                  ⭐ <b>Quality:</b> {audio_info['quality']} &nbsp;|&nbsp;
-                  🎤 <b>Recordist:</b> {audio_info['recordist']}
+                  🎵 <b>Attribution:</b> {audio_info['attribution']} &nbsp;|&nbsp;
+                  📍 <b>Location:</b> {audio_info['location'] or 'Unknown'} &nbsp;|&nbsp;
+                  📅 <b>Date:</b> {audio_info['date'] or '—'} &nbsp;|&nbsp;
+                  ⚖️ <b>License:</b> {audio_info['license']}
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            st.audio(audio_info["url"], format="audio/mp3")
-            if audio_info.get("xc_id"):
-                st.caption(f"[View full recording on Xeno-Canto](https://xeno-canto.org/{audio_info['xc_id']})")
+            st.audio(audio_info["url"], format=audio_info.get("format", "audio/mp4"))
+            st.caption("Source: [iNaturalist](https://www.inaturalist.org) — Open community science platform")
         else:
-            st.warning("No audio recording found for this species on Xeno-Canto right now.")
+            st.warning("No audio recording found for this species on iNaturalist right now.")
 
         st.divider()
 

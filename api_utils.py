@@ -209,49 +209,65 @@ def get_kids_funny_story(
         return f"Oops! The birds are hiding! 🙈 (Error: {str(e)})"
 
 
-# ── Xeno-Canto bird call audio ────────────────────────────────────────────────
+# ── iNaturalist bird call audio ───────────────────────────────────────────────
 
-def get_xenocanto_audio(scientific_name: str) -> dict | None:
+def get_inaturalist_audio(scientific_name: str) -> dict | None:
     """
-    Fetch the best-quality bird call recording from Xeno-Canto API.
-    Returns a dict with: url, recordist, location, type, quality.
+    Fetch a real bird call recording from iNaturalist observations.
+    Returns a dict with: url, attribution, license, format.
     """
     try:
         r = requests.get(
-            "https://xeno-canto.org/api/2/recordings",
-            params={"query": f"{scientific_name} q:A"},
-            timeout=8,
+            "https://api.inaturalist.org/v1/observations",
+            params={
+                "taxon_name": scientific_name,
+                "per_page": 20,
+                "sounds": "true",
+                "quality_grade": "research",
+            },
+            timeout=10,
             headers={"User-Agent": "BirdIDApp/1.0"},
         )
         if r.status_code != 200:
             return None
-        data = r.json()
-        recordings = data.get("recordings", [])
-        if not recordings:
-            # Retry without quality filter
-            r2 = requests.get(
-                "https://xeno-canto.org/api/2/recordings",
-                params={"query": scientific_name},
-                timeout=8,
-                headers={"User-Agent": "BirdIDApp/1.0"},
-            )
-            if r2.status_code == 200:
-                recordings = r2.json().get("recordings", [])
 
-        if recordings:
-            rec = recordings[0]
-            file_url = rec.get("file", "")
-            # Xeno-Canto URLs need https
-            if file_url.startswith("//"):
-                file_url = "https:" + file_url
-            return {
-                "url": file_url,
-                "recordist": rec.get("rec", "Unknown"),
-                "location": f"{rec.get('loc', '')}, {rec.get('cnt', '')}".strip(", "),
-                "type": rec.get("type", "call"),
-                "quality": rec.get("q", "?"),
-                "xc_id": rec.get("id", ""),
-            }
+        results = r.json().get("results", [])
+        # Find the first observation that has a CC-licensed sound
+        for obs in results:
+            sounds = obs.get("sounds", [])
+            for sound in sounds:
+                url = sound.get("file_url", "")
+                license_code = sound.get("license_code", "")
+                attribution = sound.get("attribution", "iNaturalist contributor")
+                place = obs.get("place_guess", "")
+                date = obs.get("observed_on", "")
+                if url and license_code:   # prefer CC-licensed
+                    fmt = "audio/wav" if url.endswith(".wav") else "audio/mp4"
+                    return {
+                        "url": url,
+                        "attribution": attribution,
+                        "license": license_code.upper(),
+                        "format": fmt,
+                        "location": place,
+                        "date": date,
+                    }
+
+        # Fallback: return first sound regardless of license
+        for obs in results:
+            sounds = obs.get("sounds", [])
+            if sounds:
+                sound = sounds[0]
+                url = sound.get("file_url", "")
+                if url:
+                    fmt = "audio/wav" if url.endswith(".wav") else "audio/mp4"
+                    return {
+                        "url": url,
+                        "attribution": sound.get("attribution", "iNaturalist contributor"),
+                        "license": sound.get("license_code", "All rights reserved").upper(),
+                        "format": fmt,
+                        "location": obs.get("place_guess", ""),
+                        "date": obs.get("observed_on", ""),
+                    }
         return None
     except Exception:
         return None
