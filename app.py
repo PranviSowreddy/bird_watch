@@ -14,7 +14,7 @@ from PIL import Image
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="🦜 Bird Watch",
+    page_title="Bird Watch",
     page_icon="🦜",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -241,13 +241,17 @@ with st.sidebar:
         "**Status:** IUCN Red List"
     )
     st.divider()
-    st.markdown("### 📋 Know more about birds")
+    st.divider()
+    st.markdown("### 🔎 Know More About Birds")
     for sp_name in sorted(SPECIES_DATA.keys()):
-        sp_info = SPECIES_DATA[sp_name]
-        cfg = IUCN_CONFIG.get(sp_info["iucn_status"], IUCN_CONFIG["NE"])
+        cfg = IUCN_CONFIG.get(SPECIES_DATA[sp_name]["iucn_status"], IUCN_CONFIG["NE"])
         dot = f'<span style="color:{cfg["color"]};">●</span>'
-        wiki_url = f"https://en.wikipedia.org/wiki/{sp_info.get('scientific_name', '').replace(' ', '_')}"
-        st.markdown(f"{dot} [{sp_name}]({wiki_url})", unsafe_allow_html=True)
+        sci = SPECIES_DATA[sp_name].get("scientific_name", sp_name).replace(" ", "_")
+        wiki_url = f"https://en.wikipedia.org/wiki/{sci}"
+        st.markdown(
+            f"{dot} [{sp_name}]({wiki_url})",
+            unsafe_allow_html=True,
+        )
     st.divider()
     st.markdown(
         "**IUCN Legend**\n"
@@ -262,7 +266,7 @@ with st.sidebar:
 # ── Hero ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero">
-  <h1>🦜 Bird Watch</h1>
+  <h1>Bird Watch</h1>
   <p>Upload a photo to identify the species, conservation status, habitat, and more</p>
 </div>
 """, unsafe_allow_html=True)
@@ -290,47 +294,46 @@ with col_hint:
 if uploaded is not None:
     image = Image.open(uploaded).convert("RGB")
 
+    # ── Run model first so both columns can use predictions ──────────────────
     with st.spinner("Identifying species…"):
         predict_fn = load_model()
         predictions, backend = predict_fn(image, top_k=3)
-
-    top_name, top_prob = predictions[0]
-    sp = SPECIES_DATA.get(top_name, {})
 
     # ── Layout: image | predictions ─────────────────────────────────────────
     col_img, col_preds = st.columns([1, 1], gap="large")
 
     with col_img:
         st.markdown('<div class="section-title">📷 Uploaded Image</div>', unsafe_allow_html=True)
-        st.image(image, use_container_width=True, caption=uploaded.name)
+        st.image(image, width="stretch", caption=uploaded.name)
 
-        # ── Bird Call Audio Player (Integrated from Kid's Corner) ───────────
+        # ── Bird audio (below the image) ─────────────────────────────────────
         from api_utils import get_inaturalist_audio
-        
+
         @st.cache_data(show_spinner=False)
-        def cached_audio(sci: str):
-            return get_inaturalist_audio(sci)
+        def cached_audio(sci_name: str):
+            return get_inaturalist_audio(sci_name)
 
-        audio_info = cached_audio(sp.get("scientific_name", top_name))
+        top_pred_name = predictions[0][0] if predictions else ""
+        _sci_for_audio = SPECIES_DATA.get(top_pred_name, {}).get(
+            "scientific_name", top_pred_name
+        )
+        with st.spinner("🔊 Fetching bird call..."):
+            audio_info = cached_audio(_sci_for_audio)
 
+        st.markdown('<div class="section-title">🔊 Real Bird Call</div>', unsafe_allow_html=True)
         if audio_info and audio_info.get("url"):
-            st.markdown(
-                f"""
-                <div style="background:#f0fdf4;border-radius:12px;padding:0.8rem 1rem;
-                            border:1px solid #bbf7d0;margin-top:1rem;font-size:0.85rem;">
-                  🎵 <b>Bird Call:</b> {audio_info['attribution']}<br>
-                  📍 {audio_info['location'] or 'Unknown'} &nbsp;|&nbsp; 📅 {audio_info['date'] or '—'}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
             st.audio(audio_info["url"], format=audio_info.get("format", "audio/mp4"))
+            st.caption(
+                f"🎵 {audio_info['attribution']} · "
+                f"📍 {audio_info['location'] or 'Unknown'} · "
+                f"📅 {audio_info['date'] or '—'} · "
+                f"[iNaturalist](https://www.inaturalist.org)"
+            )
         else:
-            st.caption("No audio recording found for this species.")
+            st.caption("⚠️ No audio recording found for this species right now.")
 
     with col_preds:
         st.markdown('<div class="section-title">🔍 Top-3 Predictions</div>', unsafe_allow_html=True)
-
         st.markdown(
             f'<span class="backend-chip">Model: {backend}</span>',
             unsafe_allow_html=True,
@@ -376,11 +379,36 @@ if uploaded is not None:
         help="Details are shown for the top-ranked prediction.",
     )
 
-    # Fetch Wikipedia summary early
+    # Fetch Wikipedia summary early (it's used in the Wikipedia tab)
     with st.spinner("Fetching background info…"):
         wiki_text = cached_wiki(top_name, sp.get("scientific_name", ""))
 
-    # Tab Order: Overview, Wikipedia, Habitat Map
+    # ── Funny Bird Story (full width, below image+predictions) ──────────────────
+    from api_utils import get_kids_funny_story
+    st.markdown('<div class="section-title">📖 Funny Bird Story</div>', unsafe_allow_html=True)
+
+    if not os.environ.get("GOOGLE_API_KEY"):
+        st.warning("🔑 Add your Google API Key to unlock the funny story!")
+        user_key = st.text_input("Paste Google API Key here:", type="password", key="story_api_key")
+        if user_key:
+            os.environ["GOOGLE_API_KEY"] = user_key
+            st.rerun()
+    else:
+        @st.cache_data(show_spinner=False)
+        def cached_funny_story(name: str, sci: str):
+            return get_kids_funny_story(name, sp, wiki_text)
+
+        with st.spinner("Writing a funny story just for you... ✍️"):
+            funny_story = cached_funny_story(top_name, sp.get("scientific_name", ""))
+
+        st.markdown(
+            f'<div class="fun-fact" style="font-size:1.08rem;border-left-color:#ff9f1c;'
+            f'background:#fff8e1;line-height:1.8;">'
+            f'🐥 <b>The Amazing Story of {top_name}:</b><br><br>{funny_story}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
     tab1, tab2, tab3 = st.tabs(["🌿 Overview", "📚 Wikipedia", "🗺️ Habitat Map"])
 
     # ── Tab 1: Overview ───────────────────────────────────────────────────────
@@ -426,9 +454,9 @@ if uploaded is not None:
             f'<div class="wiki-box">{wiki_text}</div>',
             unsafe_allow_html=True,
         )
-        sci_link = sp.get("scientific_name", top_name).replace(" ", "_")
+        sci = sp.get("scientific_name", top_name).replace(" ", "_")
         st.markdown(
-            f"[→ Read full article on Wikipedia](https://en.wikipedia.org/wiki/{sci_link})",
+            f"[→ Read full article on Wikipedia](https://en.wikipedia.org/wiki/{sci})",
             unsafe_allow_html=True,
         )
 
@@ -446,7 +474,7 @@ if uploaded is not None:
             )
 
         if occurrences:
-            # ── Month filter ────────────────────────────────────────────────
+            # ── Month filter (feeds all map types) ──────────────────────────
             months = ["All Year", "January", "February", "March", "April",
                       "May", "June", "July", "August", "September",
                       "October", "November", "December"]
@@ -486,60 +514,204 @@ if uploaded is not None:
             )
 
             with heat_tab:
+                st.caption(
+                    "Density heatmap — blue (sparse) → red (dense). "
+                    "Zoom in to explore regional clusters."
+                )
                 m_heat = build_heatmap(filtered_occurrences, top_name)
-                st_folium(m_heat, width=None, height=480, returned_objects=[], key=f"heat_{selected_month_name}")
+                st_folium(
+                    m_heat,
+                    width=None,
+                    height=480,
+                    returned_objects=[],
+                    key=f"heat_{selected_month_name}",
+                )
 
             with anim_tab:
+                st.caption(
+                    "Timeline animation — points appear chronologically. "
+                    "Use the ▶ play button on the map to start playback."
+                )
                 if len(occurrences) > 0:
                     m_anim = build_animated_map(occurrences, top_name)
-                    st_folium(m_anim, width=None, height=500, returned_objects=[], key="anim_map")
+                    st_folium(
+                        m_anim,
+                        width=None,
+                        height=500,
+                        returned_objects=[],
+                        key="anim_map",
+                    )
+                    st.info(
+                        "ℹ️ Animation uses **all-year data** regardless of the "
+                        "month filter above — the playback itself shows the "
+                        "progression through time."
+                    )
                 else:
                     st.warning("Not enough data for animation.")
 
             with marker_tab:
+                st.caption(
+                    "Clustered markers — click a cluster to expand, "
+                    "click a marker to see locality details."
+                )
                 m_mark = build_marker_map(filtered_occurrences, top_name)
-                st_folium(m_mark, width=None, height=480, returned_objects=[], key=f"mark_{selected_month_name}")
+                st_folium(
+                    m_mark,
+                    width=None,
+                    height=480,
+                    returned_objects=[],
+                    key=f"mark_{selected_month_name}",
+                )
 
-            # ── Year distribution chart ──────────────────────────────────────
+            # ── Year distribution chart ───────────────────────────────────────────────
             years = [o["year"] for o in filtered_occurrences if o["year"]]
             if years:
                 import collections
-                year_counts = collections.Counter(int(y) for y in years if str(y).isdigit())
+                year_counts = collections.Counter(
+                    int(y) for y in years if str(y).isdigit()
+                )
                 if year_counts:
                     st.markdown("**Sightings by year:**")
                     sorted_years = sorted(year_counts.keys())
                     counts = [year_counts[y] for y in sorted_years]
-                    st.bar_chart(data={"Year": sorted_years, "Sightings": counts}, x="Year", y="Sightings", color="#40916c", height=220)
+                    st.bar_chart(
+                        data={"Year": sorted_years, "Sightings": counts},
+                        x="Year",
+                        y="Sightings",
+                        color="#40916c",
+                        height=220,
+                    )
 
             # ── Near Me ─────────────────────────────────────────────────────
             st.divider()
             st.markdown("### 📍 Sightings Near Me")
-            from api_utils import get_nearby_sightings, build_nearby_map
-            radius_km = st.slider("Search radius (km)", 25, 500, 100, 25, key="near_me_radius")
-            
-            from streamlit_js_eval import get_geolocation
-            geo = get_geolocation()
-            user_lat = user_lon = None
-            if geo and "coords" in geo:
-                user_lat, user_lon = geo["coords"]["latitude"], geo["coords"]["longitude"]
-                st.success(f"📍 Location acquired: ({user_lat:.4f}, {user_lon:.4f})")
 
+            from api_utils import get_nearby_sightings, build_nearby_map
+
+            # Radius picker (shared by both input methods)
+            radius_km = st.slider(
+                "Search radius (km)", min_value=25, max_value=500,
+                value=100, step=25, key="near_me_radius",
+            )
+
+            # ── Method 1: Browser geolocation ────────────────────────────────
+            st.markdown(
+                "<div style='display:flex;align-items:center;gap:0.5rem;'>"
+                "<span style='font-size:1.5rem;'>🌐</span>"
+                "<b>Use your device location</b>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Click the button below — your browser will ask for permission "
+                "to share your location. No data is stored or sent externally."
+            )
+
+            from streamlit_js_eval import get_geolocation
+
+            geo = get_geolocation()
+
+
+            user_lat = user_lon = None
+            location_label = None
+
+            if geo and isinstance(geo, dict) and "coords" in geo:
+                coords_raw = geo["coords"]
+                user_lat = coords_raw.get("latitude")
+                user_lon = coords_raw.get("longitude")
+                accuracy = coords_raw.get("accuracy")
+                if user_lat is not None and user_lon is not None:
+                    acc_str = f", accuracy ±{accuracy:.0f} m" if accuracy else ""
+                    location_label = f"your device ({user_lat:.4f}°, {user_lon:.4f}°{acc_str})"
+                    st.success(f"📍 Location acquired: **{location_label}**")
+
+            # ── Method 2: Manual city fallback ───────────────────────────────
             if user_lat is None:
-                location_query = st.text_input("City / place name fallback", placeholder="e.g. Mumbai...")
+                st.markdown(
+                    "<div style='margin-top:0.8rem;display:flex;align-items:center;"
+                    "gap:0.5rem;'><span style='font-size:1.4rem;'>🔍</span>"
+                    "<b>Or search by city name</b></div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption("Used as a fallback if location permission is denied.")
+
+                location_query = st.text_input(
+                    "City / place name",
+                    placeholder="e.g. Mumbai, Delhi, Bengaluru…",
+                    key="near_me_query",
+                    label_visibility="collapsed",
+                )
+
                 if location_query:
                     from api_utils import geocode_location
-                    coords = geocode_location(location_query)
-                    if coords: user_lat, user_lon = coords
+                    with st.spinner(f"Locating **{location_query}**…"):
+                        coords = geocode_location(location_query)
 
+                    if coords is None:
+                        st.error(
+                            f"Could not find **{location_query}**. "
+                            "Try a different city name or check spelling."
+                        )
+                    else:
+                        user_lat, user_lon = coords
+                        location_label = (
+                            f"{location_query} ({user_lat:.3f}°, {user_lon:.3f}°)"
+                        )
+                        st.success(f"📍 Found: **{location_label}**")
+
+            # ── Render nearby map if we have coordinates ─────────────────────
             if user_lat is not None and user_lon is not None:
-                nearby = get_nearby_sightings(occurrences, user_lat, user_lon, radius_km)
+                with st.spinner("Filtering nearby sightings…"):
+                    nearby = get_nearby_sightings(
+                        occurrences, user_lat, user_lon, radius_km
+                    )
+
                 if nearby:
-                    m_near = build_nearby_map(nearby, user_lat, user_lon, top_name)
-                    st_folium(m_near, width=None, height=420, returned_objects=[], key="near_map")
+                    st.info(
+                        f"🐦 **{len(nearby)}** sighting(s) of *{top_name}* "
+                        f"within **{radius_km} km** of {location_label or 'your location'}"
+                    )
+                    m_near = build_nearby_map(
+                        nearby, user_lat, user_lon, top_name
+                    )
+                    st_folium(
+                        m_near,
+                        width=None,
+                        height=420,
+                        returned_objects=[],
+                        key=f"near_{round(user_lat, 2)}_{round(user_lon, 2)}_{radius_km}",
+                    )
+
+                    # Distance table (top 15)
+                    st.markdown("**Nearest sightings:**")
+                    table_rows = [
+                        {
+                            "Distance": f"{o['distance_km']} km",
+                            "Locality": o.get("locality", "Unknown"),
+                            "Year": o.get("year", "—"),
+                        }
+                        for o in nearby[:15]
+                    ]
+                    st.table(table_rows)
                 else:
-                    st.warning("No nearby sightings found.")
+                    st.warning(
+                        f"No sightings of *{top_name}* found within "
+                        f"**{radius_km} km** of your location. "
+                        "Try increasing the radius."
+                    )
+
         else:
-            st.warning("No iNaturalist occurrence data found.")
+            st.warning(
+                "No iNaturalist occurrence data found for this species. "
+                "This may be due to API rate limits or sparse records."
+            )
+            from api_utils import build_heatmap
+            from streamlit_folium import st_folium
+            m = build_heatmap([], top_name)
+            st_folium(m, width=None, height=400, returned_objects=[])
+
+
+
 
 else:
     # ── Landing state ─────────────────────────────────────────────────────────
@@ -551,20 +723,25 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    # Sample species grid
-    st.markdown("### 🌟 Species in the Database")
+    # ── Know More About Birds ──────────────────────────────────────────────────
+    st.markdown("### 📚 Know More About Birds")
+    st.caption("Click any bird name to learn about it on Wikipedia.")
     cols = st.columns(5)
-    items = list(SPECIES_DATA.items())
+    items = sorted(SPECIES_DATA.items())
     for i, (name, sp) in enumerate(items):
         with cols[i % 5]:
             iucn_code = sp.get("iucn_status", "NE")
             cfg = IUCN_CONFIG.get(iucn_code, IUCN_CONFIG["NE"])
+            sci_wiki = sp.get("scientific_name", name).replace(" ", "_")
+            wiki_url = f"https://en.wikipedia.org/wiki/{sci_wiki}"
             st.markdown(
                 f"""
                 <div style="background:white;border-radius:10px;padding:0.8rem;
                             margin-bottom:0.6rem;box-shadow:0 1px 4px rgba(0,0,0,0.08);
                             border-top:3px solid {cfg['color']};">
-                  <div style="font-weight:600;font-size:0.82rem;color:#1b4332;">{name}</div>
+                  <a href="{wiki_url}" target="_blank"
+                     style="font-weight:600;font-size:0.82rem;color:#1b4332;
+                            text-decoration:none;">{name}</a>
                   <div style="font-size:0.72rem;color:#6b7280;font-style:italic;">{sp['scientific_name']}</div>
                   <div style="margin-top:0.4rem;">
                     <span style="background:{cfg['color']};color:{cfg['text']};
@@ -580,7 +757,7 @@ else:
 st.divider()
 st.markdown(
     "<div style='text-align:center;color:#9ca3af;font-size:0.8rem;'>"
-    "Built with ❤️ for bird conservation awareness by Pranav and Pranavi · "
+    "Built with ❤️ by Pranav and Pranavi · "
     "Data: iNaturalist · Status: IUCN Red List · Images: Kaggle 25 Indian Birds Dataset"
     "</div>",
     unsafe_allow_html=True,
