@@ -1,6 +1,9 @@
-# 🦜 Indian Bird Identifier
+# 🦜 Bird Watch
 
-A Streamlit-powered AI application that identifies **25 common Indian bird species** from photos — complete with conservation status, GBIF habitat maps, Wikipedia summaries, and fun facts.
+A Streamlit-powered AI application by Pranav and Pranavi that identifies **25 common Indian bird species** from photos — complete with conservation status, real bird calls, Wikipedia summaries, Grad-CAM visual explanations, and AI-generated funny stories.
+
+**Live Demo:** [https://birdwatch.streamlit.app/](https://birdwatch.streamlit.app/)  
+**GitHub Repository:** [https://github.com/PranviSowreddy/bird_watch](https://github.com/PranviSowreddy/bird_watch)
 
 ---
 
@@ -9,12 +12,14 @@ A Streamlit-powered AI application that identifies **25 common Indian bird speci
 | Feature | Description |
 |---|---|
 | 🔍 **Top-3 Predictions** | Confidence bars + medal rankings for each prediction |
+| 🧠 **Explainable AI (Grad-CAM)** | Visual heatmaps showing which parts of the image the AI looked at, with Gemini Vision explanations |
+| 🔊 **Real Bird Calls** | Listen to real field recordings fetched live from iNaturalist |
+| 📖 **AI Funny Stories** | Google Gemini generates a unique, funny story about the identified bird |
 | 🏅 **IUCN Status Badge** | Color-coded conservation status (LC / NT / VU / EN / CR) |
-| 🗺️ **Interactive Habitat Map** | Real GBIF occurrence points plotted on a Folium map |
-| 📊 **Sightings Timeline** | Bar chart of GBIF sightings by year |
+| 🗺️ **Global Sightings Map** | Real occurrence points, density heatmaps, and timeline animations from iNaturalist |
+| 📍 **Near Me Integration** | Browser-based geolocation to find nearby bird sightings and geocoding via OpenStreetMap |
 | 📚 **Wikipedia Summary** | Auto-fetched first paragraph (cached) |
-| 💡 **Fun Facts** | Curated facts for all 25 species |
-| 🌿 **Species Grid** | Browse all 25 species with IUCN badges before uploading |
+| 🌿 **Know More About Birds** | Browse all 25 species with Wikipedia links before uploading |
 
 ---
 
@@ -134,8 +139,10 @@ streamlit run app.py
 
 | API | Purpose | Rate Limit |
 |---|---|---|
-| **GBIF** | Occurrence records for habitat map | 10,000 req/hr (free) |
+| **iNaturalist** | Occurrence records, location data, and audio calls | 10,000 req/day |
 | **Wikipedia REST** | Species summaries (cached to JSON) | Liberal |
+| **Google Gemini** | Grad-CAM explanation and funny stories | Requires API Key |
+| **OpenStreetMap** | Geocoding city names to coordinates (Nominatim) | 1 req/sec |
 
 ---
 
@@ -163,11 +170,10 @@ bird_app/
 
 All species metadata (IUCN status, fun facts, GBIF taxon keys, rarity) is stored in `cache/species_data.json` and can be edited directly without retraining.
 
-To add a **Gemini API** key for AI-generated fun facts (optional):
+To enable **Google Gemini** for AI-generated funny stories and Grad-CAM explanations, add your API key in Streamlit Cloud Secrets or set it locally:
 ```bash
 export GOOGLE_API_KEY="your-key-here"
 ```
-The app uses the pre-filled `species_data.json` by default (no key required).
 
 ---
 
